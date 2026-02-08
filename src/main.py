@@ -30,18 +30,35 @@ def get_data(endpoint, target_date):
     params = {"date": target_date} if endpoint != "/equities/master" else {}
     all_data = []
     pagination_key = None
+    
     while True:
         p = params.copy()
         if pagination_key: p["pagination_key"] = pagination_key
-        res = requests.get(url, headers=headers, params=p)
-        if res.status_code == 429:
-            time.sleep(10); continue
-        res.raise_for_status()
-        data = res.json()
-        all_data.extend(data.get("data", []))
-        pagination_key = data.get("pagination_key")
-        if not pagination_key: break
-        time.sleep(1)
+        
+        try:
+            res = requests.get(url, headers=headers, params=p, timeout=30)
+            
+            # 429: レートリミット
+            if res.status_code == 429:
+                print(f"  Rate limit exceeded at {endpoint}. Waiting 10s...")
+                time.sleep(10)
+                continue
+            
+            # 200以外（400エラーなど）はエラーにせず、Noneを返して次に進むように修正
+            if res.status_code != 200:
+                print(f"  [Skip] {endpoint}: API returned {res.status_code} (Data might not be ready)")
+                return None
+                
+            data = res.json()
+            all_data.extend(data.get("data", []))
+            pagination_key = data.get("pagination_key")
+            if not pagination_key: break
+            time.sleep(1)
+            
+        except Exception as e:
+            print(f"  [Error] {endpoint}: {e}")
+            return None
+            
     return all_data
 
 def save_r2(df, name, date):
@@ -50,21 +67,39 @@ def save_r2(df, name, date):
     for c in df.columns:
         if c in num_cols: df[c] = pd.to_numeric(df[c], errors='coerce')
         elif df[c].dtype == 'object': df[c] = df[c].astype(str).replace('None', '')
+    
     buf = BytesIO()
-    df.to_parquet(buf, index=False, compression='snappy')
+    df.to_parquet(buf, index=False, compression='snappy', engine='pyarrow')
     buf.seek(0)
+    
     s3 = boto3.client('s3', endpoint_url=R2_ENDPOINT_URL, aws_access_key_id=R2_ACCESS_KEY_ID, aws_secret_access_key=R2_SECRET_ACCESS_KEY)
     key = f"raw/{name}/{date[:4]}/{date[4:6]}/{name}_{date}.parquet"
     s3.upload_fileobj(buf, R2_BUCKET_NAME, key)
-    print(f"Saved: {key}")
+    print(f"  [Saved] {key}")
 
 def main():
     jst = datetime.timezone(datetime.timedelta(hours=9))
     now = datetime.datetime.now(jst)
-    date = os.environ.get("TARGET_DATE_INPUT", "").strip() or ((now - datetime.timedelta(days=1 if now.weekday()==5 else 2 if now.weekday()==6 else 0)).strftime('%Y%m%d'))
-    print(f"Target: {date}")
+    
+    # 日付決定ロジック
+    date = os.environ.get("TARGET_DATE_INPUT", "").strip()
+    if not date:
+        # 土日は金曜日を取得、それ以外は当日
+        weekday = now.weekday()
+        if weekday == 5: target_date_obj = now - datetime.timedelta(days=1)
+        elif weekday == 6: target_date_obj = now - datetime.timedelta(days=2)
+        else: target_date_obj = now
+        date = target_date_obj.strftime('%Y%m%d')
+        
+    print(f"Target Date: {date}")
+    
     for n, e in DATASETS.items():
+        print(f"Processing: {n}...")
         d = get_data(e, date)
-        if d: save_r2(pd.DataFrame(d), n, date)
+        if d:
+            save_r2(pd.DataFrame(d), n, date)
+        else:
+            print(f"  No data for {n}")
 
-if __name__ == "__main__": main()
+if __name__ == "__main__": 
+    main()
