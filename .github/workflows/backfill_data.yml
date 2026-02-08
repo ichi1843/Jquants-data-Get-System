@@ -1,17 +1,20 @@
-name: Monthly Backfill Collection
+name: Monthly Backfill Collection (Standard Plan)
 
 on:
   workflow_dispatch:
     inputs:
       target_month:
-        description: '取得したい年月 (YYYYMM) 例: 202511'
+        description: '取得したい年月 (YYYYMM) 例: 202512'
         required: true
-        default: '202511'
+      dataset_choice:
+        description: '対象データ (all または特定のフォルダ名)'
+        required: true
+        default: 'all'
 
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 60 # 1ヶ月分なので少し長めに設定
+    timeout-minutes: 360 # 最大6時間（大量データ用）
 
     steps:
       - name: Checkout code
@@ -23,7 +26,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests pandas pyarrow boto3
+        run: pip install -r requirements.txt
 
       - name: Run Backfill Script
         env:
@@ -33,4 +36,5 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
           TARGET_MONTH: ${{ github.event.inputs.target_month }}
+          DATASET_CHOICE: ${{ github.event.inputs.dataset_choice }}
         run: python src/backfill.py
