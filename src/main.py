@@ -1,12 +1,7 @@
-import os
-import time
-import datetime
-import requests
+import os, time, datetime, requests, boto3
 import pandas as pd
-import boto3
 from io import BytesIO
 
-# --- 設定 ---
 API_KEY = os.environ["JQUANTS_API_KEY"]
 R2_ACCOUNT_ID = os.environ["R2_ACCOUNT_ID"]
 R2_ACCESS_KEY_ID = os.environ["R2_ACCESS_KEY_ID"]
@@ -29,72 +24,47 @@ DATASETS = {
     "options_225": "/derivatives/bars/daily/options/225"
 }
 
-def get_jquants_data(endpoint, target_date):
+def get_data(endpoint, target_date):
     url = f"{BASE_URL}{endpoint}"
     headers = {"x-api-key": API_KEY}
     params = {"date": target_date} if endpoint != "/equities/master" else {}
     all_data = []
     pagination_key = None
     while True:
-        curr_params = params.copy()
-        if pagination_key: curr_params["pagination_key"] = pagination_key
-        try:
-            response = requests.get(url, headers=headers, params=curr_params)
-            if response.status_code == 429:
-                time.sleep(10)
-                continue
-            response.raise_for_status()
-            result = response.json()
-            all_data.extend(result.get("data", []))
-            pagination_key = result.get("pagination_key")
-            if not pagination_key: break
-            time.sleep(1)
-        except Exception as e:
-            print(f"Error fetching {endpoint}: {e}")
-            return None
+        p = params.copy()
+        if pagination_key: p["pagination_key"] = pagination_key
+        res = requests.get(url, headers=headers, params=p)
+        if res.status_code == 429:
+            time.sleep(10); continue
+        res.raise_for_status()
+        data = res.json()
+        all_data.extend(data.get("data", []))
+        pagination_key = data.get("pagination_key")
+        if not pagination_key: break
+        time.sleep(1)
     return all_data
 
-def save_to_r2(df, dataset_name, target_date):
+def save_r2(df, name, date):
     if df.empty: return
-    numeric_cols = [
-        'O', 'H', 'L', 'C', 'Vo', 'Va', 'AdjO', 'AdjH', 'AdjL', 'AdjC', 'AdjVo', 'AdjFactor',
-        'NetSales', 'OperatingProfit', 'OrdinaryProfit', 'NetIncome', 'EarningsPerShare',
-        'ShortVolume', 'LongVolume', 'ShortOut', 'LongOut', 'ShrtOutRatio', 'ShortRatio', 
-        'Position', 'Ratio', 'ForeignBuying', 'ForeignSelling', 'IndividualBuying', 'IndividualSelling',
-        'StrikePrice', 'ImpliedVolatility', 'OpenInterest'
-    ]
-    for col in df.columns:
-        if col in numeric_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        elif df[col].dtype == 'object':
-            df[col] = df[col].astype(str).replace('None', '')
-
-    buffer = BytesIO()
-    df.to_parquet(buffer, index=False, compression='snappy', engine='pyarrow')
-    buffer.seek(0)
-    s3_client = boto3.client('s3', endpoint_url=R2_ENDPOINT_URL, aws_access_key_id=R2_ACCESS_KEY_ID, aws_secret_access_key=R2_SECRET_ACCESS_KEY)
-    year, month = target_date[:4], target_date[4:6]
-    file_key = f"raw/{dataset_name}/{year}/{month}/{dataset_name}_{target_date}.parquet"
-    s3_client.upload_fileobj(buffer, R2_BUCKET_NAME, file_key)
-    print(f"Successfully uploaded: {file_key}")
+    num_cols = ['O','H','L','C','Vo','Va','AdjO','AdjH','AdjL','AdjC','AdjVo','AdjFactor','NetSales','OperatingProfit','OrdinaryProfit','NetIncome','EarningsPerShare','ShortVolume','LongVolume','ShortOut','LongOut','ShrtOutRatio','ShortRatio','Position','Ratio','ForeignBuying','ForeignSelling','IndividualBuying','IndividualSelling','StrikePrice','ImpliedVolatility','OpenInterest']
+    for c in df.columns:
+        if c in num_cols: df[c] = pd.to_numeric(df[c], errors='coerce')
+        elif df[c].dtype == 'object': df[c] = df[c].astype(str).replace('None', '')
+    buf = BytesIO()
+    df.to_parquet(buf, index=False, compression='snappy')
+    buf.seek(0)
+    s3 = boto3.client('s3', endpoint_url=R2_ENDPOINT_URL, aws_access_key_id=R2_ACCESS_KEY_ID, aws_secret_access_key=R2_SECRET_ACCESS_KEY)
+    key = f"raw/{name}/{date[:4]}/{date[4:6]}/{name}_{date}.parquet"
+    s3.upload_fileobj(buf, R2_BUCKET_NAME, key)
+    print(f"Saved: {key}")
 
 def main():
     jst = datetime.timezone(datetime.timedelta(hours=9))
-    now_jst = datetime.datetime.now(jst)
-    manual_date = os.environ.get("TARGET_DATE_INPUT", "").strip()
-    if manual_date:
-        target_date = manual_date
-    else:
-        weekday = now_jst.weekday()
-        if weekday == 5: target_date_obj = now_jst - datetime.timedelta(days=1)
-        elif weekday == 6: target_date_obj = now_jst - datetime.timedelta(days=2)
-        else: target_date_obj = now_jst
-        target_date = target_date_obj.strftime('%Y%m%d')
+    now = datetime.datetime.now(jst)
+    date = os.environ.get("TARGET_DATE_INPUT", "").strip() or ((now - datetime.timedelta(days=1 if now.weekday()==5 else 2 if now.weekday()==6 else 0)).strftime('%Y%m%d'))
+    print(f"Target: {date}")
+    for n, e in DATASETS.items():
+        d = get_data(e, date)
+        if d: save_r2(pd.DataFrame(d), n, date)
 
-    for folder_name, endpoint in DATASETS.items():
-        data = get_jquants_data(endpoint, target_date)
-        if data:
-            save_to_r2(pd.DataFrame(data), folder_name, target_date)
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
