@@ -1,10 +1,9 @@
-import os, duckdb, datetime, calendar
+import os, duckdb, datetime
 
 def backfill_summary_month():
-    # 入力例: 202501
     target_month = os.environ.get("TARGET_MONTH", "").strip()
     if not target_month or len(target_month) != 6:
-        print("❌ TARGET_MONTH (YYYYMM) を正しく指定してください。")
+        print("❌ TARGET_MONTH (YYYYMM) を指定してください。")
         return
 
     year, month = target_month[:4], target_month[4:6]
@@ -26,7 +25,6 @@ def backfill_summary_month():
         SET s3_use_ssl=true;
     """)
 
-    # 1. 処理対象の日付リストをR2から取得
     quotes_glob = f"s3://{BUCKET}/raw/daily_quotes/{year}/{month}/*.parquet"
     try:
         files_df = con.sql(f"SELECT file FROM glob('{quotes_glob}')").df()
@@ -35,18 +33,16 @@ def backfill_summary_month():
         print(f"⚠️ 指定月のデータが見つかりません: {e}")
         return
 
-    print(f"📅 合計 {len(dates)} 日分を処理します。")
-
     for d_str in dates:
         print(f"  🍳 調理中: {d_str} ... ", end="", flush=True)
         fmt_date = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
-        output_key = f"processed/daily_summary/{year}/{month}/summary_{d_str}.parquet"
+        
+        # 出力先を Sum_data に変更
+        output_key = f"Sum_data/daily_summary/{year}/{month}/summary_{d_str}.parquet"
 
-        # 究極の調理SQL（生データ3種 + テクニカル指標一括計算）
         query = f"""
         COPY (
             WITH RawQuotes AS (
-                -- テクニカル計算のため対象日の60日前から取得
                 SELECT CAST(Date AS DATE) as Date, Code, C, Vo, H, L
                 FROM read_parquet('s3://{BUCKET}/raw/daily_quotes/**/*.parquet')
                 WHERE CAST(Date AS DATE) <= '{fmt_date}'
@@ -68,14 +64,14 @@ def backfill_summary_month():
                 QUALIFY ROW_NUMBER() OVER (PARTITION BY Code ORDER BY DiscDate DESC) = 1
             ),
             LatestMaster AS (
-                SELECT Code, CoName, S33Nm, MktNm, TradingUnit
+                SELECT Code, CoName, S33Nm, MktNm, TU  -- TU (TradingUnit) に修正
                 FROM read_parquet('s3://{BUCKET}/raw/equities_master/**/*.parquet')
                 WHERE Date <= '{fmt_date}'
                 QUALIFY ROW_NUMBER() OVER (PARTITION BY Code ORDER BY Date DESC) = 1
             )
             SELECT 
                 t.Date, t.Code, m.CoName, m.S33Nm, m.MktNm, t.C as Price,
-                (t.C * CAST(NULLIF(m.TradingUnit, '') AS INTEGER)) as MinPurchasePrice,
+                (t.C * CAST(NULLIF(m.TU, '') AS INTEGER)) as MinPurchasePrice, -- TU に修正
                 (t.C * CAST(NULLIF(f.ShOutFY, '') AS DOUBLE)) as MarketCap,
                 ROUND((t.C - t.MA25) / NULLIF(t.MA25, 0) * 100, 2) as MA25Diff,
                 ROUND((t.C - t.MA25) / NULLIF(t.STD25, 0), 2) as BB_SigmaScore,
