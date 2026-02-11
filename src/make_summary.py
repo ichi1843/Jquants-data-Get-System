@@ -25,9 +25,9 @@ def cook_daily_summary():
         SET s3_use_ssl=true;
     """)
 
-    output_key = f"processed/daily_summary/{target_date[:4]}/{target_date[4:6]}/summary_{target_date}.parquet"
+    # 出力先を Sum_data に変更
+    output_key = f"Sum_data/daily_summary/{target_date[:4]}/{target_date[4:6]}/summary_{target_date}.parquet"
     
-    # 毎日実行用SQL（最新状態を反映）
     query = f"""
     COPY (
         WITH RawQuotes AS (
@@ -50,13 +50,13 @@ def cook_daily_summary():
             QUALIFY ROW_NUMBER() OVER (PARTITION BY Code ORDER BY DiscDate DESC) = 1
         ),
         LatestMaster AS (
-            SELECT Code, CoName, S33Nm, MktNm, TradingUnit
+            SELECT Code, CoName, S33Nm, MktNm, TU  -- TU (TradingUnit) に修正
             FROM read_parquet('s3://{BUCKET}/raw/equities_master/**/*.parquet')
             QUALIFY ROW_NUMBER() OVER (PARTITION BY Code ORDER BY Date DESC) = 1
         )
         SELECT 
             t.Date, t.Code, m.CoName, m.S33Nm, m.MktNm, t.C as Price,
-            (t.C * CAST(NULLIF(m.TradingUnit, '') AS INTEGER)) as MinPurchasePrice,
+            (t.C * CAST(NULLIF(m.TU, '') AS INTEGER)) as MinPurchasePrice, -- TU に修正
             (t.C * CAST(NULLIF(f.ShOutFY, '') AS DOUBLE)) as MarketCap,
             ROUND((t.C - t.MA25) / NULLIF(t.MA25, 0) * 100, 2) as MA25Diff,
             ROUND((t.C - t.MA25) / NULLIF(t.STD25, 0), 2) as BB_SigmaScore,
@@ -75,7 +75,7 @@ def cook_daily_summary():
     ) TO 's3://{BUCKET}/{output_key}' (FORMAT PARQUET);
     """
     con.execute(query)
-    print(f"✨ 本日のSummary保存完了")
+    print(f"✨ 本日のSummary保存完了: {output_key}")
 
 if __name__ == "__main__":
     cook_daily_summary()
