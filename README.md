@@ -1,36 +1,40 @@
-# J-Quants Data Collection System
+# 📦 J-Quants Data Collection System
 
-J-Quants API v2 から日本株市場データを自動収集し、Cloudflare R2 ストレージに Parquet 形式で保存するためのシステムです。
-GitHub Actions を利用して、日次データの取得、過去データのバックフィル、欠損データの整合性チェックを自動化しています。
+J-Quants API v2 から日本株市場データを自動収集し、Cloudflare R2 ストレージに Parquet 形式で保存するためのデータレイク構築システムです。
+
+![Python](https://img.shields.io/badge/Python-3.10-blue)
+![Storage](https://img.shields.io/badge/Storage-Cloudflare%20R2-orange)
+![Platform](https://img.shields.io/badge/Platform-GitHub%20Actions-black)
+![Format](https://img.shields.io/badge/Format-Parquet-green)
+
+GitHub Actions を利用して、日次データの取得、過去データのバックフィル、欠損データの整合性チェックを完全に自動化しています。
 
 ## 🚀 特徴
 
-*   **完全自動化**: GitHub Actions により、毎日決まった時間（JST 19:30）にデータを収集。
-*   **低コスト・高効率**: データは軽量な Parquet 形式で圧縮され、Cloudflare R2（S3互換）に保存されます。
-*   **バックフィル機能**: 指定した年月のデータをまとめて取得可能。
-*   **整合性チェック**: 週間スケジュールで過去データの欠損をチェックし、自動リカバリを試みます。
+- **完全自動化**: GitHub Actions により、毎日決まった時間（JST 19:30）にデータを自動収集。
+- **低コスト・高効率**: データは軽量な **Parquet形式** で圧縮。Cloudflare R2（S3互換）に保存することで、ストレージ費用を抑えつつ高速なデータアクセスを実現。
+- **堅牢な運用**: 
+  - **バックフィル**: 過去の特定年月データを一括取得可能。
+  - **整合性チェック**: 毎週日曜日に過去10日間のデータをスキャンし、欠損があれば自動リカバリ。
 
 ## 📊 収集データ (Datasets)
 
-以下のエンドポイントに対応しています。
+J-Quants API v2 の以下の主要エンドポイントを網羅しています。
 
-*   `equities_master`: 銘柄マスター
-*   `daily_quotes`: 株価四本値 (日足)
-*   `fins_summary`: 財務情報
-*   `earnings_calendar`: 決算発表予定
-*   `indices_topix`: TOPIX (日足)
-*   `margin_interest`: 信用取引残高
-*   `margin_alert`: 信用取引残高 (日証金)
-*   `short_ratio`: 空売り比率
-*   `short_sale_report`: 空売り集計
-*   `investor_types`: 投資部門別売買状況
-*   `options_225`: 日経225オプション (日足)
+| カテゴリ | データセット名 | 内容 |
+| :--- | :--- | :--- |
+| **基本情報** | `equities_master` | 銘柄マスター |
+| **株価** | `daily_quotes` | 株価四本値 (日足) |
+| **財務/決算** | `fins_summary`, `earnings_calendar` | 財務情報、決算発表予定 |
+| **指数** | `indices_topix` | TOPIX (日足) |
+| **信用/空売り** | `margin_*`, `short_*` | 信用取引残高、空売り比率 |
+| **その他** | `investor_types`, `options_225` | 投資部門別売買、日経225オプション |
 
 ## 🛠️ セットアップ
 
 ### 1. 前提条件
-*   **J-Quants API アカウント**: 有効なリフレッシュトークンが必要です。
-*   **Cloudflare R2**: バケットを作成し、API クレデンシャルを発行してください。
+- **J-Quants API アカウント**: 有効なリフレッシュトークンが必要です。
+- **Cloudflare R2**: バケットを作成し、API クレデンシャル（S3互換）を発行してください。
 
 ### 2. GitHub Secrets の設定
 リポジトリの `Settings` > `Secrets and variables` > `Actions` に以下のシークレットを設定してください。
@@ -45,21 +49,21 @@ GitHub Actions を利用して、日次データの取得、過去データの�
 
 ## 🔄 ワークフローの使い方
 
-### 1. Daily J-Quants Data Collection (`daily_stock_data.yml`)
-*   **自動実行**: 毎日 **19:30 JST** (10:30 UTC) に実行されます。当日（土日の場合は直前の金曜日）のデータを取得します。
-*   **手動実行**: `Workflow dispatch` から日付 (`YYYYMMDD`) を指定して特定日のデータを再取得できます。
+### 1. 日次収集 (`daily_stock_data.yml`)
+- **自動実行**: 毎日 **19:30 JST** に実行。
+- **手動実行**: `Actions` タブより、日付 (`YYYYMMDD`) を指定して再取得が可能。
 
-### 2. Monthly Backfill Collection (`backfill_data.yml`)
-*   **手動実行**: `Actions` タブからこのワークフローを選択し、対象月 (`YYYYMM`) を入力して実行します。
-*   **例**: `202411` と入力すると、2024年11月の全営業日のデータを取得します。
+### 2. バックフィル実行 (`backfill_data.yml`)
+- **用途**: 過去データの蓄積。
+- **方法**: `Actions` タブから対象月 (`YYYYMM`) を入力して実行。
 
-### 3. Weekly Data Integrity Check (`integrity_check.yml`)
-*   **自動実行**: 毎週 **日曜日 00:00 JST** (土曜 15:00 UTC) に実行されます。
-*   **機能**: 直近10日間のデータをスキャンし、保存されていないデータがあれば自動的に再取得を試みます。
+### 3. 整合性チェック (`integrity_check.yml`)
+- **自動実行**: 毎週 **日曜日 00:00 JST**。
+- **機能**: 直近10日間の欠損を検知し、自動で再取得を試みます。
 
 ## 📂 保存ディレクトリ構成
 
-R2 バケット内には以下の構造で保存されます。
+Cloudflare R2 内には、DuckDBなどで扱いやすいパーティション構造で保存されます。
 
 ```text
 raw/
