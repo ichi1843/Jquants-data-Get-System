@@ -16,14 +16,14 @@ DATASETS = {
     "fins_summary":      "/fins/summary",
     "earnings_calendar": "/equities/earnings-calendar",
     "indices_topix":     "/indices/bars/daily/topix",
+    "indices_daily":     "/indices/bars/daily",
     "margin_interest":   "/markets/margin-interest",
     "margin_alert":      "/markets/margin-alert",
     "short_ratio":       "/markets/short-ratio",
     "short_sale_report": "/markets/short-sale-report",
     "investor_types":    "/equities/investor-types",
     "options_225":       "/derivatives/bars/daily/options/225",
-    "indices_daily":     "/indices/bars/daily",   # 業種別・TOPIX-17等 追加
-    "market_calendar":   "/markets/calendar",     # 取引カレンダー 追加
+    "market_calendar":   "/markets/calendar",
 }
 
 NUM_COLS = [
